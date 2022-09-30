@@ -26,7 +26,7 @@ countDGDL 8 C,	countDGDL 9 C,	countDGDL 10 C,	countNGDL 0 C,	countNGDL 1 C,	coun
 Units: <br />
 Trade: log(kg) <br />
 Cold_stress: difference in cold stress (unitless)	<br />
-Heat_Stress: difference in cold stress (unitless)	<br />
+Heat_Stress: difference in heat stress (unitless)	<br />
 STS: correlation of yield fluctuations (unitless) <br />
 GDP per capita: GDP per capita of exporting country + importing country (2010 US$) <br />
 GDP: GDP of exporting country + importing country (2010 US$)	 <br />
