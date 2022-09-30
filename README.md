@@ -1,6 +1,7 @@
 # Wheat trade tends to happen between countries with contrasting extreme weather stress and synchronous yield variation
 
 This repository contains data belonging to manuscript published in Communications Earth and Environment journal.
+The data are for the period of 2005-2014
 
 ## File descriptions <br />
 Figure_1.csv: this file contains the data belonging to the Figure 1 and Supplemtary Figures 13-S29. <br />
@@ -23,7 +24,7 @@ countDGDL 8 C,	countDGDL 9 C,	countDGDL 10 C,	countNGDL 0 C,	countNGDL 1 C,	coun
 
 
 ### Figure_2.csv <br />
-Units: <br />
+Units and definitions: <br />
 Trade: log(kg) <br />
 Cold_stress: difference in cold stress (unitless)	<br />
 Heat_Stress: difference in heat stress (unitless)	<br />
