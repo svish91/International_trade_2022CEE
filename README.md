@@ -12,15 +12,15 @@ RG_Model.R: this file contains the model fitting from RF using the data in Figur
 
 ### Figure_1.csv <br />
 Units and definitions: <br />
-Trade volume: kg <br />
-Production: kg N <br />
-Imports: kg <br />
-Exports: kg	<br />
-IDR: unitless <br />
-Degree_imp: unitless (importing degree)	 <br />
-Degree_exp:	unitless (exporting degree) <br />
+Trade volume: international wheat trade volume (kg) <br />
+Production: wheat production (kg N) <br />
+Imports: wheat imports (kg) <br />
+Exports: wheat exports (kg)	<br />
+IDR: import dependency ratio unitless <br />
+Degree_imp: importing degree (unitless)	 <br />
+Degree_exp:	exporting degree (unitless) <br />
 PC_coldstress,	PC_heatstress,	countDGDH 26 C,	countDGDH 27 C,	countDGDH 28 C,	countDGDH 29 C,	countDGDH 30 C,	countDGDL 6 C	, countDGDL 7 C,
-countDGDL 8 C,	countDGDL 9 C,	countDGDL 10 C,	countNGDL 0 C,	countNGDL 1 C,	countNGDL 2 C,	countNGDL 3 C,	countNGDL 4 C,	countPREH,	countPREL: unitless <br />
+countDGDL 8 C,	countDGDL 9 C,	countDGDL 10 C,	countNGDL 0 C,	countNGDL 1 C,	countNGDL 2 C,	countNGDL 3 C,	countNGDL 4 C,	countPREH,	countPREL: weahter indices for wheat (unitless) <br />
 
 
 ### Figure_2.csv <br />
