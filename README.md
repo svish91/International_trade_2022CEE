@@ -10,7 +10,7 @@ RG_Model.R: this file contains the model fitting from RF using the data in Figur
 
 
 ### Figure_1.csv <br />
-Units: <br />
+Units and definitions: <br />
 Trade volume: kg <br />
 Production: kg N <br />
 Imports: kg <br />
@@ -31,5 +31,5 @@ STS: unitless (correlation of yield fluctuations) <br />
 GDP per capita: 2010 US$ <br />
 GDP: 2010 US$	 <br />
 GATT_WTO, RTA, Contiguity, Common official language: unitless dichotomous variable <br />
-Production: Kg N	<br />	
+Production: This is difference in production (Kg N)	<br />	
 Distance: km		<br />
