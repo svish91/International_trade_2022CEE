@@ -4,7 +4,7 @@ This repository contains data belonging to manuscript published in Communication
 The data are for the period of 2005-2014
 
 ## File descriptions <br />
-Figure_1.csv: this file contains the data belonging to the Figure 1 and Supplemtary Figures 13-S29. <br />
+Figure_1.csv: this file contains the data belonging to the Figure 1 and Supplemtary Figures 13-29. <br />
 Figure_2.csv: this file contains the data used to generate Figure 2 in the manuscript file. <br />
 ERGM_Model.R: this file contains the model fitting with ERGM using the data in Figure_2.csv. <br />
 RG_Model.R: this file contains the model fitting from RF using the data in Figure_2.csv.<br />
