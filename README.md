@@ -32,5 +32,5 @@ STS: correlation of yield fluctuations (unitless) <br />
 GDP per capita: GDP per capita of exporting country + importing country (2010 US$) <br />
 GDP: GDP of exporting country + importing country (2010 US$)	 <br />
 GATT_WTO, RTA, Contiguity, Common official language: unitless dichotomous variable <br />
-Production: This is difference in production (Kg N)	<br />	
+Production: difference in production (Kg N)	<br />	
 Distance: distance between exporting and importing coutry km		<br />
