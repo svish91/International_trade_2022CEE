@@ -25,7 +25,7 @@ countDGDL 8 C,	countDGDL 9 C,	countDGDL 10 C,	countNGDL 0 C,	countNGDL 1 C,	coun
 
 ### Figure_2.csv <br />
 Units and definitions: <br />
-Trade: net trade log(kg) <br />
+Trade: net trade (log(kg)) <br />
 Cold_stress: difference in cold stress (unitless)	<br />
 Heat_Stress: difference in heat stress (unitless)	<br />
 STS: correlation of yield fluctuations (unitless) <br />
