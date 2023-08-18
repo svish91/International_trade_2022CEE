@@ -1,5 +1,5 @@
 # Wheat trade tends to happen between countries with contrasting extreme weather stress and synchronous yield variation
-Citaion: Vishwakarma, S., Zhang, X. & Lyubchich, V. Wheat trade tends to happen between countries with contrasting extreme weather stress and synchronous yield variation. Commun Earth Environ 3, 261 (2022). https://doi.org/10.1038/s43247-022-00591-7
+Citation: Vishwakarma, S., Zhang, X. & Lyubchich, V. Wheat trade tends to happen between countries with contrasting extreme weather stress and synchronous yield variation. Commun Earth Environ 3, 261 (2022). https://doi.org/10.1038/s43247-022-00591-7
 
 
 This repository contains data belonging to manuscript published in Communications Earth and Environment journal.
