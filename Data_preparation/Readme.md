@@ -1,7 +1,7 @@
 These files contains the data prepation steps. Before running the code, following libraries with sepcific verions are required.
 
 # Use  R version: R version 4.0.4 (2021-02-15)
-library(ergm) # version: 4.1.2
+library(ergm) # version: 4.1.2 <br>
 library(reticulate) # version:  1.20
 library(stringr) # version: 1.4.0
 library(factoextra) # version: 1.0.7
