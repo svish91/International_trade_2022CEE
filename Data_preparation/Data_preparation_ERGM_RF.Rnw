@@ -1,0 +1,729 @@
+\documentclass[12pt]{article}
+
+%\usepackage{amsfonts,amsmath,amssymb}
+%\usepackage[toc,page]{appendix}
+\usepackage[yyyymmdd]{datetime}
+\renewcommand{\dateseparator}{-}
+\usepackage[margin=1in]{geometry}
+%\usepackage{gensymb} %to use extra symbols, such as {\degree}
+\usepackage{graphicx}
+
+\usepackage[colorlinks,citecolor=blue,linkcolor=blue]{hyperref}
+%\usepackage{lscape}
+%\usepackage{multicol}
+%\usepackage[]{natbib}
+\usepackage{parskip}
+%\usepackage[section]{placeins} %to use the command \FloatBarrier
+
+\title{Nested ERGM tests}
+
+\author{S. Vishwakarma}
+
+\date{\today}
+
+\begin{document}
+
+%Try not to edit this chunk:
+<<setup0, echo = FALSE>>=
+options(digits = 3)
+options(width = 110) #width of text output from R
+opts_chunk$set(size = 'scriptsize', echo = T, eval = T,
+               fig.width = 12, fig.height = 5, #dimensions in inches
+               out.width = '\\textwidth', fig.show = "hold",
+               fig.align = "center", message = FALSE, warning = FALSE)
+@
+
+
+
+<<>>=
+# Use  R version: R version 4.0.4 (2021-02-15)
+
+rm(list = ls())
+library(ergm) # version: 4.1.2
+library(reticulate) # version:  1.20
+library(stringr) # version: 1.4.0
+library(factoextra) # version: 1.0.7
+library(Hmisc) # version: 4.5-0
+library(reshape) # version: 0.8.8
+library(R.matlab) # version: 3.6.2
+library(ergMargins) # version: 0.1.3
+library(ggplot2) # version: 3.3.5
+library(MLmetrics) # version: 1.1.1
+library(caret) # version: 6.0-88
+library(corrplot) # version: 0.90
+library(reshape2) # version: 1.4.4
+library(ranger) # version: 0.13.1
+library(randomForest) # version: 4.6-14
+@
+
+Setting seed:
+<<>>=
+set.seed(1310)
+@
+\section{Loading functions} 
+
+
+<<>>=
+source("f_DetrendSeries.R")
+source("f_derivedPCA_WI_m.R")
+@
+
+
+<<>>=
+# main input file
+load('Main_input_Github.Rdata')
+@
+
+\section{Adjusting yield data}
+<<>>=
+Nyield_m = Nyield.kgkm[,167,45:54] # 167 index is for wheat and 45:54 is for 2005-2014
+# finding countries with at least 7 years of data
+TMP_NAind <- sapply(1:nrow(Nyield_m), function(x) length(which(is.na(Nyield_m[x,])==T))>3)#
+Nyield_noNA <- Nyield_m[!TMP_NAind, ]
+# index of countries which have NA values
+idx_NA=which(TMP_NAind==TRUE)
+idx_NA.Data <-idx_NA
+# index of countries with no NA
+idx_noNA=which(TMP_NAind==FALSE)
+idx_noNA.Data =idx_noNA
+
+@
+
+
+\subsubsection{PCA calculation of weather indices}
+<<>>=
+varNames_c = c( "GP4_countDGDH_1", "GP4_countDGDH_2", "GP4_countDGDH_3", "GP4_countDGDH_4", 
+                "GP4_countDGDH_5", "GP4_countDGDL_1", "GP4_countDGDL_2", "GP4_countDGDL_3", 
+                "GP4_countDGDL_4", "GP4_countDGDL_5", "GP4_countNGDL_1", "GP4_countNGDL_2", 
+                "GP4_countNGDL_3", "GP4_countNGDL_4", "GP4_countNGDL_5", "GP4_countPREH",    
+                "GP4_countPREL" )     
+yrs = 27:36 # 2005-2014
+allWI_c = matrix(data=NA, nrow = length(varNames_c), ncol = ncol(GP4_countDGDH_1))
+for (i in 1:length(varNames_c)){
+  allWI_c[i,] = eval(parse(text = paste("colMeans(",varNames_c[i],"[yrs,], na.rm = TRUE)",sep="")))
+}
+
+# renaming column and row names
+colnames(allWI_c) <- tmpCoName 
+rownames(allWI_c) <- varNames_c
+
+# using non-NA rows only
+allWI_c_m = t(allWI_c[,complete.cases(t(allWI_c))])
+# calculating derived PC
+WI_pca_c = f_derivedPCA_WI_m(allWI_c_m,thr = 80, scale = "N")
+
+# scree plot
+fviz_eig(WI_pca_c$WI_PCA, addlabels = TRUE, ylim = c(0, 70), geom="bar", ncp  = 10, barfill = "blue")+
+  theme_classic()+theme(text = element_text(size = 40),
+                                                                                           axis.title = element_text(size = 30),       
+        axis.text = element_text(size = 30),
+)         
+
+@
+
+\subsection{Finding common countries}
+
+<<>>=
+c = 1
+ii.tradeCo = tr_coName
+ii.wiCo = tmpCoName
+ii.yieldCo = unlist(FAOSTAT.CoName.FAO)[idx_noNA]
+ii.cepii = rownames(distw_net)
+ii.Co_1 = intersect(ii.tradeCo,ii.wiCo)
+ii.Co_2 = intersect(ii.Co_1,ii.cepii)
+ii.countries = intersect(ii.Co_2,ii.yieldCo)
+@
+
+
+\subsection{Detrending crop yield record}
+
+<<>>=
+# reading the data
+Ydata <- t(Nyield_noNA)
+# assigning the column names as country names
+colnames(Ydata) <-unlist(FAOSTAT.CoName.FAO)[idx_noNA]
+# sub-setting data
+Ydata = Ydata[,ii.countries]
+# detrending yield record
+Ydata_Dtrend = f_DetrendSeries(Ydata)$DTS
+@
+
+\section{Preparing Data for ERGM model}
+\subsection{Crop Yield Data}
+<<>>=
+# Correlation matrix with pearson correlation
+CM_pearson <- cor(Ydata_Dtrend, method = "pearson")
+CM_pearson <- CM_pearson[ii.countries, ii.countries]
+@
+
+
+\subsection{Trade Data}
+Average trade data for years 2004 to 2014
+<<>>=
+# finding common countries
+idx_tr_m = match(ii.countries, tr_coName)
+wh_trdQ_avg_m <- apply(wh_trdQnt[,idx_tr_m,idx_tr_m], c(2,3), mean)
+# renaming column and rownames
+colnames(wh_trdQ_avg_m) <- ii.countries
+rownames(wh_trdQ_avg_m) <- ii.countries
+
+# Trade Adjacency Matrix: Directed
+# Trade Quantity : unit tonnes
+# row = importers, column = exporters
+TradeQ <- wh_trdQ_avg_m
+Trade01 <- TradeQ
+# creating unwiehgted trade network
+Trade01[Trade01>0] = 1
+
+# Trade Quantity with log
+TradeQlog <- log10(TradeQ+1)
+@
+
+\subsection{Network of extreme weather stress}
+
+<<>>=
+# creating network of extreme weather stress
+WI_pca_scores01_c <-WI_pca_c$derived_PCA[ii.countries,]
+for (i in 1:ncol(WI_pca_c$derived_PCA)){
+  # vertex variable
+  eval(parse(text = paste0("PC_c", i , "_vertex = WI_pca_scores01_c$Dim.",i)))
+  eval(parse(text = paste0("names(PC_c", i , "_vertex) = ii.countries")))
+  # edge variable
+  eval(parse(text = paste0("WI_pca_scr_dimMat_c", i , "<- outer(WI_pca_scores01_c$Dim.",i,", WI_pca_scores01_c$Dim.",i,", '-')")))
+  eval(parse(text = paste0("colnames(WI_pca_scr_dimMat_c",i,") <- ii.countries")))
+  eval(parse(text = paste0("rownames(WI_pca_scr_dimMat_c",i,") <- ii.countries")))
+  eval(parse(text = paste0("WI_pca_scr_dimMat_c",i,"[is.na(WI_pca_scr_dimMat_c",i,")]=0")))
+  
+}
+
+@
+
+
+
+\subsection{CEPII}
+<<>>=
+cepii_idx = ii.countries
+### distw: weighted distance (pop-wt, km)
+distw_net01 <- distw_net[cepii_idx, cepii_idx]
+### common language official language: 1 for common official or primary language
+comlangOff_net01 <- comlangOff_net[cepii_idx, cepii_idx]
+### contiguity:  neighbours
+contig_net01 <- contig_net[cepii_idx, cepii_idx]
+
+@
+
+\subsection{GDP}
+<<>>=
+# # reading population data
+POP.P.2010.SAM_t  = t(POP.SAM$POP.SAM)
+colnames(POP.P.2010.SAM_t) = unlist(FAOSTAT.CoName.FAO)
+# index 45:54 belong to years 2005-2014
+POP_avg = colMeans(POP.P.2010.SAM_t[45:54,ii.countries],na.rm = TRUE)
+
+
+# Creating GDP per cap
+GDP.P.2010.SAM_t  = t(GDP.P.2010.SAM)
+colnames(GDP.P.2010.SAM_t) = unlist(FAOSTAT.CoName.FAO)
+GDP_avg = colMeans((GDP.P.2010.SAM_t[45:54,ii.countries]*POP.P.2010.SAM_t[45:54,ii.countries])/POP.P.2010.SAM_t[45:54,ii.countries],
+                   na.rm = TRUE)
+
+# total GDP
+GDP_Tot = colMeans(GDP.P.2010.SAM_t[45:54,ii.countries]*POP.P.2010.SAM_t[45:54,ii.countries], na.rm=TRUE)
+
+@
+
+\subsection{GATT_WTO}
+<<>>=
+## GATT
+ii_coname = match(data_cepii$iso3_o,shapefile$ISO3)
+data_cepii$coname_o = shapefile$NAME[ii_coname]
+# destination countries
+ii_coname = match(data_cepii$iso3_d,shapefile$ISO3)
+data_cepii$coname_d = shapefile$NAME[ii_coname]
+data_cepii = data_cepii[]
+
+GATT_o = matrix(0, nrow=length(ii.countries), ncol=10)
+WTO_o = matrix(0, nrow=length(ii.countries), ncol=10)
+GATT_WTO_o = matrix(0, nrow=length(ii.countries), ncol=10)
+
+for (co in 1:length(ii.countries)) {
+    i=1
+    for(yr in 2005:2014){
+        if (identical(unique(data_cepii$gatt_o[which(data_cepii$coname_o == ii.countries[co]  
+                                                     & data_cepii$year == yr )]),integer(0))){
+            GATT_o[co,i] = 0 
+        }
+        else {
+            GATT_o[co,i] = unique(data_cepii$gatt_o[which(data_cepii$coname_o == ii.countries[co]  
+                                                          & data_cepii$year == yr )])
+        }
+        
+        if (identical(unique(data_cepii$wto_o[which(data_cepii$coname_o == ii.countries[co]  
+                                                    & data_cepii$year == yr )]),integer(0))){
+            WTO_o[co,i] = 0 
+        }
+        else {
+            WTO_o[co,i] = unique(data_cepii$wto_o[which(data_cepii$coname_o == ii.countries[co]  
+                                                        & data_cepii$year == yr )])
+        }
+        GATT_WTO_o[co,i] = max(WTO_o[co,i], GATT_o[co,i])
+        i=i+1
+    }
+    
+}
+getmode <- function(v) {
+    uniqv <- unique(v)
+    uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+GATT_o_m <- apply(GATT_o,1,getmode)
+WTO_o_m <- apply(WTO_o,1,getmode)
+GATT_WTO_o_m <- apply(GATT_WTO_o,1,getmode)
+
+names(GATT_o_m) <- ii.countries
+names(WTO_o_m) <- ii.countries
+names(GATT_WTO_o_m) <- ii.countries
+@
+
+\subsection{Regional Trade agreement}
+<<>>=
+# RTA
+RTA = data.frame(from = data_cepii$coname_o,
+                 to = data_cepii$coname_d,
+                 value = data_cepii$rta, year = data_cepii$year )
+RTA = RTA[RTA$year>=2005,]
+co_idx_frm = lapply(1:length(ii.countries), FUN = function(i) {which(RTA$from == ii.countries[i])})
+co_idx_to = lapply(1:length(ii.countries), FUN = function(i) {which(RTA$to == ii.countries[i])})
+
+RTA_m = matrix(NA, 115, 115)
+
+for(i in 1:115){
+    for(j in 1:115){
+    
+        RTA_m[i,j] = getmode(RTA$value[intersect(co_idx_frm[[i]],co_idx_to[[j]])])
+    }
+}
+colnames(RTA_m) = ii.countries
+rownames(RTA_m) = ii.countries
+
+
+RTA_m[is.na(RTA_m)] = 0
+
+@
+
+\subsection{Production Data}
+<<>>=
+# index 167 is for wheat; 45:54 is for 2005-2014
+Prod_data = t(Nproduction.kg[,167,45:54])
+colnames(Prod_data) <- unlist(FAOSTAT.CoName.FAO)
+Prod_data_m = colMeans(Prod_data[,ii.countries])
+@
+
+
+\section{Creating Networks}
+\subsection{Unweighted network}
+<<>>=
+###################### trade for unweighted  network
+############## Response Variable = Trade  average 10 years
+# Trade network directed
+ntwrk_trade_Duw <- network::as.network(as.matrix(t(Trade01)), directed = TRUE, matrix.type = "adjacency")
+# adding edge and vertex variables
+network::set.edge.value(ntwrk_trade_Duw, attrname = "TradeQ", value = t(TradeQ))
+network::set.edge.value(ntwrk_trade_Duw, attrname = "TradeQlog", value = t(TradeQlog))
+network::set.edge.value(ntwrk_trade_Duw, attrname = "Contiguity", value = contig_net01)
+network::set.edge.value(ntwrk_trade_Duw, attrname = "Distance_w", value = distw_net01)
+network::set.edge.value(ntwrk_trade_Duw, attrname = "Common_Lang_off", value = comlangOff_net01)
+
+network::set.vertex.attribute(ntwrk_trade_Duw,attrname='GDP_pc',value = GDP_avg[!is.na(GDP_avg)] )
+network::set.vertex.attribute(ntwrk_trade_Duw,attrname='GDP_tot',value = GDP_Tot[!is.na(GDP_Tot)] )
+network::set.vertex.attribute(ntwrk_trade_Duw,attrname='GDP_tot_log',value = log10(GDP_Tot[!is.na(GDP_Tot)]) )
+network::set.vertex.attribute(ntwrk_trade_Duw,attrname='GATT_WTO',value = GATT_WTO_o_m )
+network::set.vertex.attribute(ntwrk_trade_Duw,attrname='Production',value = Prod_data_m )
+
+
+# adding PCA's
+# count only
+for (i in 1:ncol(WI_pca_c$derived_PCA)){
+  eval(parse(text = paste0("network::set.vertex.attribute(ntwrk_trade_Duw, attrname = 'PCA_dim_c",i, "',value = PC_c",i,"_vertex[complete.cases(PC_c",i,"_vertex)])")))
+}
+
+
+@
+
+\subsection{Weighted network}
+<<>>=
+###################### trade for weighted  network
+# directed trade network
+ntwrk_trade_Dw <- network::as.network(as.matrix(t(TradeQlog)), directed = T, matrix.type = "adjacency")
+# trade network
+network::set.edge.value(ntwrk_trade_Dw, attrname = "TradeQ", value = t(TradeQ))
+network::set.edge.value(ntwrk_trade_Dw, attrname = "TradeQlog", value = t(TradeQlog))
+network::set.vertex.attribute(ntwrk_trade_Dw,attrname='GDP_pc',value = GDP_avg[!is.na(GDP_avg)] )
+
+network::set.vertex.attribute(ntwrk_trade_Dw,attrname='GDP_tot',value = GDP_Tot[!is.na(GDP_Tot)] )
+network::set.vertex.attribute(ntwrk_trade_Dw,attrname='GDP_tot_log',value = log10(GDP_Tot[!is.na(GDP_Tot)]) )
+network::set.vertex.attribute(ntwrk_trade_Dw,attrname='GATT_WTO',value = GATT_WTO_o_m )
+network::set.vertex.attribute(ntwrk_trade_Dw,attrname='Production',value = Prod_data_m )
+
+
+# adding PCA's
+# count only
+for (i in 1:ncol(WI_pca_c$derived_PCA)){
+  eval(parse(text = paste0("network::set.vertex.attribute(ntwrk_trade_Dw, attrname = 'PCA_dim_c",i, "',value = PC_c",i,"_vertex[complete.cases(PC_c",i,"_vertex)])")))
+}
+@
+
+\section{ERGM model}
+\subsection{Unweighted network}
+<<>>=
+sig.act = "identity"
+
+summary(ergm(ntwrk_trade_Duw ~ 
+                 # extreme weather
+                 diff(attr = "PCA_dim_c2", pow = 1, sign.action = sig.act)+
+                 diff(attr = "Production", pow = 1, sign.action = sig.act)+
+                 
+                 nodecov(attr = "GDP_pc")+
+                 nodecov(attr = "GDP_tot")+
+                 nodematch(attr = "GATT_WTO")+
+                 edgecov(RTA_m, attrname = 'RTA')+ 
+                 edgecov(CM_pearson,attrname='STS')+
+                 edgecov(contig_net01,attrname="Contiguity")+
+                 edgecov(distw_net01,attrname = "Distance_w")+
+                 edgecov(comlangOff_net01, attrname = "Common_Lang_off"), 
+             control = control.ergm(seed = 10, MCMC.interval = 1, MCMC.burnin=1000, MCMLE.nonident.tol = 1e-20) ))
+
+@
+
+\subsection{Weighted network}
+<<>>=
+# with edges
+sig.act = "identity"
+summary(ergm(ntwrk_trade_Dw ~  
+               # extreme weather
+               diff(attr = "PCA_dim_c1", pow = 1, sign.action = sig.act)+
+               diff(attr = "PCA_dim_c2", pow = 1, sign.action = sig.act)+
+               diff(attr = "Production", pow = 1, sign.action = sig.act)+
+               nodecov(attr = "GDP_pc")+
+               nodecov(attr = "GDP_tot_log")+
+               nodematch(attr = "GATT_WTO")+
+               edgecov(RTA_m, attrname = 'RTA')+
+               edgecov(CM_pearson,attrname='STS')+
+               edgecov(contig_net01,attrname="Contiguity")+
+               edgecov(distw_net01,attrname = "Distance_w")+
+               edgecov(comlangOff_net01, attrname = "Common_Lang_off")
+             ,
+             response = "TradeQlog",reference = ~Unif(0,round(max(TradeQlog))),
+             estimate = "MLE",eval.loglik = TRUE,
+             control = control.ergm(seed = 100,
+                                    main.method = 'Stochastic-Approximation'
+             ), verbose =FALSE))
+
+
+@
+
+\section{RF data creation}
+\subsection{Weighted network}
+
+<<>>=
+# diagnonal of pearson correlation is set to NA as we don't want self loop
+CM_pearson_m1 <- CM_pearson
+diag(CM_pearson_m1) <- NA
+
+DATA_WD_tmp = data.frame(Trade = melt(t(TradeQlog))$value, 
+                     Cold_stress = melt(WI_pca_scr_dimMat_c1)$value, 
+                     Heat_Stress = melt(WI_pca_scr_dimMat_c2)$value,
+                     STS=melt(CM_pearson_m1)$value,                      
+                     GDP_pc = melt(outer(GDP_avg, GDP_avg, '+'))$value,
+                     GDP_tot = melt(outer(log10(GDP_Tot), log10(GDP_Tot), '+'))$value,
+                     GATT_WTO = factor(melt(GATT_WTO_o_m)$value),
+                     Production = melt(outer(Prod_data_m, Prod_data_m, '-'))$value,
+                     RTA = factor(melt(RTA_m)$value),
+                     Distance = melt(distw_net01)$value,
+                     Contiguity = factor(melt(contig_net01)$value),
+                     offLang = factor(melt(comlangOff_net01)$value),
+                     exporter = melt(t(TradeQlog))$Var1,
+                     importer = melt(t(TradeQlog))$Var2
+)
+# print number of exporter and importers
+print(c(length(unique(DATA_WD_tmp$importer)), length(unique(DATA_WD_tmp$exporter))))
+# 115 115
+## removing exportor and importer column
+idx_ei = match(c('exporter','importer'), colnames(DATA_WD_tmp))
+DATA_WD = DATA_WD_tmp[,-idx_ei]
+# number of edges in the network
+print(length(DATA_WD$Trade[which(DATA_WD$Trade != 0)]))
+# 5726 
+
+# removing columns/rows whcih have NAs
+DATA_WD <- DATA_WD[complete.cases(DATA_WD),]
+# number of edges in the network
+print(length(DATA_WD$Trade[which(DATA_WD$Trade != 0)]))
+# 5547
+
+## this DATA_WD can be directly used in the RF_Model.R code
+@
+
+\subsubsection{Model fit}
+<<>>=
+DATA <- DATA_WD
+RESPONSE <- "Trade" #column name in the data frame "DATA"
+NTREE <- 500
+
+set.seed(10000)
+# train RF
+rf_all_WD <- ranger(dependent.variable.name = RESPONSE, data = na.omit(DATA),
+                    importance = 'impurity_corrected',
+                    #min.node.size = 3,
+                    respect.unordered.factors = 'partition',
+                    num.trees = NTREE)
+print(rf_all_WD) #the first RF to start with -- see if R2 improves in further prints
+
+rm("vn")
+count <- 1 #count how many times we re-run RF
+while (any(rf_all_WD$variable.importance <= 0)) {
+    vn <- names(rf_all_WD$variable.importance)[rf_all_WD$variable.importance > 0]
+    DATAnoNA <- na.omit(DATA[, c(RESPONSE, vn)])
+    rf_all_WD <- ranger(dependent.variable.name = RESPONSE, data = DATAnoNA,
+                        importance = 'impurity_corrected',
+                        min.node.size = 3, respect.unordered.factors = 'partition',
+                        num.trees = NTREE)
+    count <- count + 1
+}
+set.seed(20000)
+if (exists("DATAnoNA") == TRUE) {
+    rf_allimp <- importance_pvalues(rf_all_WD, method = "altmann",
+                                    num.permutations = 100,
+                                    formula = as.formula(paste(RESPONSE, ".", sep = " ~ ")),
+                                    data = DATAnoNA)
+} else {
+    rf_allimp <- importance_pvalues(rf_all_WD, method = "altmann",
+                                    num.permutations = 100,
+                                    formula = as.formula(paste(RESPONSE, ".", sep = " ~ ")),
+                                    data = DATA)  
+}
+rf_allimp <- rf_allimp[order(rf_allimp[,1]),]
+v <- sort(rownames(rf_allimp)[rf_allimp[, 2] < 0.05])
+
+par(mar = c(3, 5.5, 2, 1) + 0.1,
+    mgp = c(2, 0.7, 0),
+    mfrow = c(1, 1))
+tmp <- sort(rf_all_WD$variable.importance)
+
+barplot(tmp,
+        beside = TRUE, las = 1, #xlim = c(0, 0.4),
+        main = "a) Importance",
+        xlab = "Importance",
+        col = 1, border = NA, cex.names = 0.6,
+        horiz = TRUE)
+tmp <- rf_allimp[,2]
+barplot(tmp,
+        beside = TRUE, las = 1, xlim = c(0, 0.5),
+        main = "b) Statistical significance",
+        xlab = "p-value",
+        col = 1, border = NA, cex.names = 0.6,
+        horiz = TRUE)
+abline(v = 0.05, col = "gray", lty = 2)
+
+set.seed(30000)
+DATAnoNAv <- na.omit(DATA[, c(RESPONSE, v)])
+rf_all_WDv <- ranger(dependent.variable.name = RESPONSE, data = DATAnoNAv,
+                     # importance = 'impurity_corrected',
+                     # min.node.size = 3,
+                     respect.unordered.factors = 'partition',
+                     num.trees = NTREE)
+print(rf_all_WDv)
+
+# Final random forest output from another package
+
+library(randomForest)
+set.seed(40000)
+rf_all_WDv2 <- randomForest(y = DATAnoNAv[,RESPONSE],
+                            x = DATAnoNAv[, v],
+                            nodesize = rf_all_WDv$min.node.size,
+                            mtry = rf_all_WDv$mtry,
+                            ntree = rf_all_WDv$num.trees)
+print(rf_all_WDv2)
+plot(rf_all_WDv2)
+
+
+RF <- rf_all_WDv2
+preds <- sort(v)
+
+# variable importance plot
+library(vip)
+vip(RF) + theme(text = element_text(size = 20))
+
+pdf("Plot_pdp_weightedTrade_countWI_additionalVars_set4_m.pdf", width = 10, height = 10)
+
+par(mfrow = c(ceiling(length(preds)/3), 3))
+par(bty = "L", mar = c(5, 6, 4, 1) + 0.1, mgp = c(2, 0.7, 0))
+for(i in 1:length(preds)) {
+    if(preds[i] == "Time_Block") {
+        partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                    las = 1, xlab = "", ylab = "", main = "", xpd = F,
+                    cex.lab = 2, cex.axis = 2, lwd = 2, cex.names = 2
+                    #,ylim = c(1000, 2200)
+        )
+    } else {
+        if (preds[i] == "Contiguity" || preds[i] == "offLang"){
+            partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                        las = 1, xlab = preds[i], ylab = "", main = "", xpd = F,
+                        cex.lab = 2, cex.axis = 2, lwd = 2, cex.names = 2
+                        #,ylim = c(1000, 2200)
+            )
+        } else {
+            partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                        las = 1, xlab = preds[i], ylab = "", main = "", xpd = F,
+                        cex.lab = 2, cex.axis = 2, lwd = 2
+                        #,ylim = c(1000, 2200)
+            )
+        }
+        
+    }
+    mtext("log(kg)", side = 2, line = 4, cex = 1.5)
+    mtext(paste("(", letters[i], ")", sep = ""), side = 3, line = 0.1, cex =1, adj = 0)
+}
+dev.off()
+@
+
+\subsection{Unweighted network}
+<<>>=
+CM_pearson_m1 <- CM_pearson
+diag(CM_pearson_m1) <- NA
+DATA_UWD = data.frame(Trade = melt(t(Trade01))$value, 
+                     Cold_stress = melt(WI_pca_scr_dimMat_c1)$value, 
+                     Heat_Stress = melt(WI_pca_scr_dimMat_c2)$value,
+                     STS=melt(CM_pearson_m1)$value,                      
+                     GDP_pc = melt(outer(GDP_avg, GDP_avg, '+'))$value,
+                     GDP_tot = melt(outer(GDP_Tot, GDP_Tot, '+'))$value,
+                     GATT_WTO = factor(melt(GATT_WTO_o_m)$value),
+                     Production = melt(outer(Prod_data_m, Prod_data_m, '-'))$value,
+                     RTA = factor(melt(RTA_m)$value),
+                     Distance = melt(distw_net01)$value,
+                     Contiguity = factor(melt(contig_net01)$value),
+                     offLang = factor(melt(comlangOff_net01)$value)) 
+DATA_UWD <- DATA_UWD[complete.cases(DATA_UWD),]
+@
+
+\subsubsection{Model fit}
+<<>>=
+DATA <- DATA_UWD
+RESPONSE <- "Trade" #column name in the data frame "DATA"
+NTREE <- 500
+
+set.seed(10000)
+# train RF
+rf_all_WD <- ranger(dependent.variable.name = RESPONSE, data = na.omit(DATA),
+                    importance = 'impurity_corrected',
+                    respect.unordered.factors = 'partition',
+                    num.trees = NTREE)
+print(rf_all_WD) 
+
+rm("vn")
+count <- 1 #count how many times we re-run RF
+while (any(rf_all_WD$variable.importance <= 0)) {
+    vn <- names(rf_all_WD$variable.importance)[rf_all_WD$variable.importance > 0]
+    DATAnoNA <- na.omit(DATA[, c(RESPONSE, vn)])
+    rf_all_WD <- ranger(dependent.variable.name = RESPONSE, data = DATAnoNA,
+                        importance = 'impurity_corrected',
+                        min.node.size = 3, respect.unordered.factors = 'partition',
+                        num.trees = NTREE)
+    count <- count + 1
+}
+set.seed(20000)
+if (exists("DATAnoNA") == TRUE) {
+    rf_allimp <- importance_pvalues(rf_all_WD, method = "altmann",
+                                    num.permutations = 100,
+                                    formula = as.formula(paste(RESPONSE, ".", sep = " ~ ")),
+                                    data = DATAnoNA)
+} else {
+    rf_allimp <- importance_pvalues(rf_all_WD, method = "altmann",
+                                    num.permutations = 100,
+                                    formula = as.formula(paste(RESPONSE, ".", sep = " ~ ")),
+                                    data = DATA)  
+}
+rf_allimp <- rf_allimp[order(rf_allimp[,1]),]
+v <- sort(rownames(rf_allimp)[rf_allimp[, 2] < 0.05])
+
+par(mar = c(3, 5.5, 2, 1) + 0.1,
+    mgp = c(2, 0.7, 0),
+    mfrow = c(1, 1))
+tmp <- sort(rf_all_WD$variable.importance)
+
+barplot(tmp,
+        beside = TRUE, las = 1, 
+        main = "a) Importance",
+        xlab = "Importance",
+        col = 1, border = NA, cex.names = 0.6,
+        horiz = TRUE)
+tmp <- rf_allimp[,2]
+barplot(tmp,
+        beside = TRUE, las = 1, xlim = c(0, 0.5),
+        main = "b) Statistical significance",
+        xlab = "p-value",
+        col = 1, border = NA, cex.names = 0.6,
+        horiz = TRUE)
+abline(v = 0.05, col = "gray", lty = 2)
+
+
+set.seed(30000)
+DATAnoNAv <- na.omit(DATA[, c(RESPONSE, v)])
+rf_all_WDv <- ranger(dependent.variable.name = RESPONSE, data = DATAnoNAv,
+                     respect.unordered.factors = 'partition',
+                     num.trees = NTREE)
+print(rf_all_WDv)
+
+# Final random forest output from another package 
+
+library(randomForest)
+set.seed(40000)
+rf_all_WDv2 <- randomForest(y = DATAnoNAv[,RESPONSE],
+                            x = DATAnoNAv[, v],
+                            nodesize = rf_all_WDv$min.node.size,
+                            mtry = rf_all_WDv$mtry,
+                            ntree = rf_all_WDv$num.trees)
+print(rf_all_WDv2)
+plot(rf_all_WDv2)
+
+
+RF <- rf_all_WDv2
+preds <- sort(v)
+
+# variable importance plot
+vip(RF) + theme(text = element_text(size = 20))
+
+# use save plot otherwise margin error will occur 
+pdf("Plot_pdp_unweightedTrade_countWI_additionalVars_set4.pdf", width = 10, height = 10)
+
+par(mfrow = c(ceiling(length(preds)/3), 3))
+par(bty = "L", mar = c(5, 6, 4, 1) + 0.1, mgp = c(2, 0.7, 0))
+for(i in 1:length(preds)) {
+    if(preds[i] == "Time_Block") {
+        partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                    las = 1, xlab = "", ylab = "", main = "", xpd = F,
+                    cex.lab = 2, cex.axis = 2, lwd = 2, cex.names = 2
+                    #,ylim = c(1000, 2200)
+        )
+    } else {
+        if (preds[i] == "Contiguity" || preds[i] == "offLang"){
+            partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                        las = 1, xlab = preds[i], ylab = "", main = "", xpd = F,
+                        cex.lab = 2, cex.axis = 2, lwd = 2, cex.names = 2
+                        #,ylim = c(1000, 2200)
+            )
+        } else {
+            partialPlot(RF, pred.data = DATAnoNAv, x.var = preds[i],
+                        las = 1, xlab = preds[i], ylab = "", main = "", xpd = F,
+                        cex.lab = 2, cex.axis = 2, lwd = 2
+                        #,ylim = c(1000, 2200)
+            )
+        }
+        
+    }
+    mtext("P(Link formation)", side = 2, line = 4, cex = 1.5)
+    mtext(paste("(", letters[i], ")", sep = ""), side = 3, line = 0.1, cex =1, adj = 0)
+}
+dev.off()
+
+@
+\end{document}
