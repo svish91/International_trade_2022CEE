@@ -1,4 +1,4 @@
-# These files contains the data prepation steps in Vishwakarma et al. (2022). Before running the code, following libraries with sepcific verions are required. <br>
+# These files contains the data prepation steps in Vishwakarma et al. (2022). Before running the code, following libraries with specific verions are required. <br>
 
 Use  R version: R version 4.0.4 (2021-02-15) <br> 
 library(ergm) # version: 4.1.2 <br> 
