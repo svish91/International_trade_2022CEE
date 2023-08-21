@@ -34,7 +34,7 @@ opts_chunk$set(size = 'scriptsize', echo = T, eval = T,
 @
 
 
-
+\section{Loading essential libraties}
 <<>>=
 # Use  R version: R version 4.0.4 (2021-02-15)
 
@@ -54,7 +54,11 @@ library(corrplot) # version: 0.90
 library(reshape2) # version: 1.4.4
 library(ranger) # version: 0.13.1
 library(randomForest) # version: 4.6-14
+library(network) # version: 1.17.1
+library(FactoMineR) # version: 2.4
+library(vip) # version: 0.3.2
 @
+
 
 Setting seed:
 <<>>=
@@ -71,12 +75,13 @@ source("f_derivedPCA_WI_m.R")
 
 <<>>=
 # main input file
-load('Main_input_Github.Rdata')
+load('Main_Input_Github2023.Rdata')
 @
 
-\section{Adjusting yield data}
+\section{Initial adjustment to yield and weather data}
+\subsection{Yield record}
 <<>>=
-Nyield_m = Nyield.kgkm[,167,45:54] # 167 index is for wheat and 45:54 is for 2005-2014
+Nyield_m = Nyield.kgkm_wh[,45:54]# 45:54 is for years 2005-2014
 # finding countries with at least 7 years of data
 TMP_NAind <- sapply(1:nrow(Nyield_m), function(x) length(which(is.na(Nyield_m[x,])==T))>3)#
 Nyield_noNA <- Nyield_m[!TMP_NAind, ]
@@ -98,6 +103,7 @@ varNames_c = c( "GP4_countDGDH_1", "GP4_countDGDH_2", "GP4_countDGDH_3", "GP4_co
                 "GP4_countNGDL_3", "GP4_countNGDL_4", "GP4_countNGDL_5", "GP4_countPREH",    
                 "GP4_countPREL" )     
 yrs = 27:36 # 2005-2014
+# taking average of years 2005-2014
 allWI_c = matrix(data=NA, nrow = length(varNames_c), ncol = ncol(GP4_countDGDH_1))
 for (i in 1:length(varNames_c)){
   allWI_c[i,] = eval(parse(text = paste("colMeans(",varNames_c[i],"[yrs,], na.rm = TRUE)",sep="")))
@@ -121,22 +127,21 @@ fviz_eig(WI_pca_c$WI_PCA, addlabels = TRUE, ylim = c(0, 70), geom="bar", ncp  = 
 
 @
 
-\subsection{Finding common countries}
+\subsection{Finding common countries among all datasets}
 
 <<>>=
-c = 1
-ii.tradeCo = tr_coName
-ii.wiCo = tmpCoName
-ii.yieldCo = unlist(FAOSTAT.CoName.FAO)[idx_noNA]
-ii.cepii = rownames(distw_net)
+ii.tradeCo = tr_coName # countries in trade data
+ii.wiCo = tmpCoName # countries in weather data
+ii.yieldCo = unlist(FAOSTAT.CoName.FAO)[idx_noNA] # countries in yield data
+ii.cepii = rownames(distw_net) # countries in CEPII data
+# identifying common countries across all datasets
 ii.Co_1 = intersect(ii.tradeCo,ii.wiCo)
 ii.Co_2 = intersect(ii.Co_1,ii.cepii)
-ii.countries = intersect(ii.Co_2,ii.yieldCo)
+ii.countries = intersect(ii.Co_2,ii.yieldCo) # this includes 115 countries
 @
 
 
 \subsection{Detrending crop yield record}
-
 <<>>=
 # reading the data
 Ydata <- t(Nyield_noNA)
@@ -148,17 +153,17 @@ Ydata = Ydata[,ii.countries]
 Ydata_Dtrend = f_DetrendSeries(Ydata)$DTS
 @
 
-\section{Preparing Data for ERGM model}
-\subsection{Crop Yield Data}
+\section{Preparing Data for model}
+\subsection{Short term syncrhony}
 <<>>=
 # Correlation matrix with pearson correlation
-CM_pearson <- cor(Ydata_Dtrend, method = "pearson")
-CM_pearson <- CM_pearson[ii.countries, ii.countries]
+STS_pearson <- cor(Ydata_Dtrend, method = "pearson")
+STS_pearson <- STS_pearson[ii.countries, ii.countries]
 @
 
 
 \subsection{Trade Data}
-Average trade data for years 2004 to 2014
+Average trade data for years 2005 to 2014
 <<>>=
 # finding common countries
 idx_tr_m = match(ii.countries, tr_coName)
@@ -179,7 +184,7 @@ Trade01[Trade01>0] = 1
 TradeQlog <- log10(TradeQ+1)
 @
 
-\subsection{Network of extreme weather stress}
+\subsection{Network of extreme weather stress; DEWS}
 
 <<>>=
 # creating network of extreme weather stress
@@ -195,12 +200,16 @@ for (i in 1:ncol(WI_pca_c$derived_PCA)){
   eval(parse(text = paste0("WI_pca_scr_dimMat_c",i,"[is.na(WI_pca_scr_dimMat_c",i,")]=0")))
   
 }
+# Resulting variables :
+
+# DEWS cold stress: PC_c1_vertex (nodal variable), WI_pca_scr_dimMat_c1 (edge network)
+# DEWS heat stress: PC_c2_vertex (nodal variable), WI_pca_scr_dimMat_c2 (edge network)
 
 @
 
 
 
-\subsection{CEPII}
+\subsection{Distance, contiguity, and language}
 <<>>=
 cepii_idx = ii.countries
 ### distw: weighted distance (pop-wt, km)
@@ -212,8 +221,9 @@ contig_net01 <- contig_net[cepii_idx, cepii_idx]
 
 @
 
-\subsection{GDP}
+\subsection{GDP per capita and total GDP}
 <<>>=
+# index 45:54 here indicates years 2005-2014
 # # reading population data
 POP.P.2010.SAM_t  = t(POP.SAM$POP.SAM)
 colnames(POP.P.2010.SAM_t) = unlist(FAOSTAT.CoName.FAO)
@@ -234,6 +244,7 @@ GDP_Tot = colMeans(GDP.P.2010.SAM_t[45:54,ii.countries]*POP.P.2010.SAM_t[45:54,i
 
 \subsection{GATT_WTO}
 <<>>=
+# this section take a little bit of time in calculation, but it runs.
 ## GATT
 ii_coname = match(data_cepii$iso3_o,shapefile$ISO3)
 data_cepii$coname_o = shapefile$NAME[ii_coname]
@@ -312,8 +323,8 @@ RTA_m[is.na(RTA_m)] = 0
 
 \subsection{Production Data}
 <<>>=
-# index 167 is for wheat; 45:54 is for 2005-2014
-Prod_data = t(Nproduction.kg[,167,45:54])
+# index 45:54 is for 2005-2014
+Prod_data = t(Nproduction.kg_wh[,45:54])
 colnames(Prod_data) <- unlist(FAOSTAT.CoName.FAO)
 Prod_data_m = colMeans(Prod_data[,ii.countries])
 @
@@ -379,14 +390,14 @@ sig.act = "identity"
 
 summary(ergm(ntwrk_trade_Duw ~ 
                  # extreme weather
-                 diff(attr = "PCA_dim_c2", pow = 1, sign.action = sig.act)+
+                 diff(attr = "PCA_dim_c2", pow = 1, sign.action = sig.act)+ 
                  diff(attr = "Production", pow = 1, sign.action = sig.act)+
                  
                  nodecov(attr = "GDP_pc")+
                  nodecov(attr = "GDP_tot")+
                  nodematch(attr = "GATT_WTO")+
                  edgecov(RTA_m, attrname = 'RTA')+ 
-                 edgecov(CM_pearson,attrname='STS')+
+                 edgecov(STS_pearson,attrname='STS')+
                  edgecov(contig_net01,attrname="Contiguity")+
                  edgecov(distw_net01,attrname = "Distance_w")+
                  edgecov(comlangOff_net01, attrname = "Common_Lang_off"), 
@@ -407,7 +418,7 @@ summary(ergm(ntwrk_trade_Dw ~
                nodecov(attr = "GDP_tot_log")+
                nodematch(attr = "GATT_WTO")+
                edgecov(RTA_m, attrname = 'RTA')+
-               edgecov(CM_pearson,attrname='STS')+
+               edgecov(STS_pearson,attrname='STS')+
                edgecov(contig_net01,attrname="Contiguity")+
                edgecov(distw_net01,attrname = "Distance_w")+
                edgecov(comlangOff_net01, attrname = "Common_Lang_off")
@@ -426,13 +437,13 @@ summary(ergm(ntwrk_trade_Dw ~
 
 <<>>=
 # diagnonal of pearson correlation is set to NA as we don't want self loop
-CM_pearson_m1 <- CM_pearson
-diag(CM_pearson_m1) <- NA
+STS_pearson_m1 <- STS_pearson
+diag(STS_pearson_m1) <- NA
 
 DATA_WD_tmp = data.frame(Trade = melt(t(TradeQlog))$value, 
                      Cold_stress = melt(WI_pca_scr_dimMat_c1)$value, 
                      Heat_Stress = melt(WI_pca_scr_dimMat_c2)$value,
-                     STS=melt(CM_pearson_m1)$value,                      
+                     STS=melt(STS_pearson_m1)$value,                      
                      GDP_pc = melt(outer(GDP_avg, GDP_avg, '+'))$value,
                      GDP_tot = melt(outer(log10(GDP_Tot), log10(GDP_Tot), '+'))$value,
                      GATT_WTO = factor(melt(GATT_WTO_o_m)$value),
@@ -453,7 +464,7 @@ DATA_WD = DATA_WD_tmp[,-idx_ei]
 # number of edges in the network
 print(length(DATA_WD$Trade[which(DATA_WD$Trade != 0)]))
 # 5726 
-
+write.csv(DATA_WD_tmp,file ='Data_complete.csv')
 # removing columns/rows whcih have NAs
 DATA_WD <- DATA_WD[complete.cases(DATA_WD),]
 # number of edges in the network
@@ -465,6 +476,7 @@ print(length(DATA_WD$Trade[which(DATA_WD$Trade != 0)]))
 
 \subsubsection{Model fit}
 <<>>=
+# this section takes long time to finish
 DATA <- DATA_WD
 RESPONSE <- "Trade" #column name in the data frame "DATA"
 NTREE <- 500
@@ -535,7 +547,6 @@ print(rf_all_WDv)
 
 # Final random forest output from another package
 
-library(randomForest)
 set.seed(40000)
 rf_all_WDv2 <- randomForest(y = DATAnoNAv[,RESPONSE],
                             x = DATAnoNAv[, v],
@@ -550,7 +561,6 @@ RF <- rf_all_WDv2
 preds <- sort(v)
 
 # variable importance plot
-library(vip)
 vip(RF) + theme(text = element_text(size = 20))
 
 pdf("Plot_pdp_weightedTrade_countWI_additionalVars_set4_m.pdf", width = 10, height = 10)
@@ -588,12 +598,12 @@ dev.off()
 
 \subsection{Unweighted network}
 <<>>=
-CM_pearson_m1 <- CM_pearson
-diag(CM_pearson_m1) <- NA
+STS_pearson_m1 <- STS_pearson
+diag(STS_pearson_m1) <- NA
 DATA_UWD = data.frame(Trade = melt(t(Trade01))$value, 
                      Cold_stress = melt(WI_pca_scr_dimMat_c1)$value, 
                      Heat_Stress = melt(WI_pca_scr_dimMat_c2)$value,
-                     STS=melt(CM_pearson_m1)$value,                      
+                     STS=melt(STS_pearson_m1)$value,                      
                      GDP_pc = melt(outer(GDP_avg, GDP_avg, '+'))$value,
                      GDP_tot = melt(outer(GDP_Tot, GDP_Tot, '+'))$value,
                      GATT_WTO = factor(melt(GATT_WTO_o_m)$value),
@@ -607,6 +617,7 @@ DATA_UWD <- DATA_UWD[complete.cases(DATA_UWD),]
 
 \subsubsection{Model fit}
 <<>>=
+# this section takes long time to finish
 DATA <- DATA_UWD
 RESPONSE <- "Trade" #column name in the data frame "DATA"
 NTREE <- 500
@@ -674,8 +685,6 @@ rf_all_WDv <- ranger(dependent.variable.name = RESPONSE, data = DATAnoNAv,
 print(rf_all_WDv)
 
 # Final random forest output from another package 
-
-library(randomForest)
 set.seed(40000)
 rf_all_WDv2 <- randomForest(y = DATAnoNAv[,RESPONSE],
                             x = DATAnoNAv[, v],
